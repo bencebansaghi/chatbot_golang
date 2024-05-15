@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Davincible/goinsta/v3"
 	"github.com/joho/godotenv"
@@ -14,6 +15,11 @@ import (
 const (
 	configPath = "./.goinsta"
 )
+
+type Post struct {
+	Caption   string
+	ShortCode string
+}
 
 func loadEnvVar(varName string) (string, error) {
 	variable, ok := os.LookupEnv(varName)
@@ -41,7 +47,7 @@ func loadEnvInstaUserPass() (string, string, error) {
 func getPosts(insta *goinsta.Instagram) /*[]goinsta.Item*/ {
 	profilesStr, err := loadEnvVar("INSTA_PROFILES")
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("posts: ", err)
 	}
 	profiles := strings.Split(profilesStr, ",")
 	getPost(insta, profiles[len(profiles)-1])
@@ -50,7 +56,7 @@ func getPosts(insta *goinsta.Instagram) /*[]goinsta.Item*/ {
 func getPost(insta *goinsta.Instagram, profileStr string) /*goinsta.Item, */ {
 	profile, err := insta.VisitProfile(profileStr)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("post: ", err)
 	}
 
 	user := profile.User
@@ -66,7 +72,7 @@ func main() {
 	if err != nil {
 		log.Panic("Error loading .env file")
 	}
-	insta, err := goinsta.Import(configPath)
+	insta, err := goinsta.Import(configPath, true) // skips initial sync as the profile is only used for the timeline, not for posting
 	if err != nil {
 		log.Println("Error loading .goinsta file, trying to login from dotenv")
 		username, password, err := loadEnvInstaUserPass()
@@ -86,10 +92,16 @@ func main() {
 	}
 	tl := insta.Timeline
 	for _, item := range tl.Items {
+		if item.IsCommercial || item.IsPaidPartnership {
+			fmt.Println("Skipping commercial post")
+			continue
+		}
 		fmt.Println(item.Caption.Text)
+		fmt.Println(item.Code)
+		fmt.Println(time.Unix(item.TakenAt, 0))
 	}
-
 	// this dont work
+	fmt.Println("Getting posts")
 	getPosts(insta)
 
 	defer insta.Export(configPath)
