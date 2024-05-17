@@ -19,6 +19,7 @@ const (
 type Post struct {
 	Caption   string
 	ShortCode string
+	Username  string
 }
 
 func loadEnvVar(varName string) (string, error) {
@@ -44,27 +45,48 @@ func loadEnvInstaUserPass() (string, string, error) {
 	return username, password, nil
 }
 
-func getPosts(insta *goinsta.Instagram) /*[]goinsta.Item*/ {
+func getPosts(insta *goinsta.Instagram) []Post {
 	profilesStr, err := loadEnvVar("INSTA_PROFILES")
 	if err != nil {
 		log.Fatal("posts: ", err)
 	}
 	profiles := strings.Split(profilesStr, ",")
-	getPost(insta, profiles[len(profiles)-1])
+	allPosts := []Post{}
+	for _, profile := range profiles {
+		posts := getPostsLastDay(insta, profile)
+		if len(posts) != 0 {
+			allPosts = append(allPosts, posts...)
+		}
+	}
+	return allPosts
 }
 
-func getPost(insta *goinsta.Instagram, profileStr string) /*goinsta.Item, */ {
+func getPostsLastDay(insta *goinsta.Instagram, profileStr string) []Post {
 	profile, err := insta.VisitProfile(profileStr)
 	if err != nil {
-		log.Fatal("post: ", err)
+		// I couldn't find any warning type Ali please hjelp :3
+		log.Printf("Error while fetching %s profile: %s\n", profileStr, err)
+		return []Post{}
 	}
+	lastDayPosts := []Post{}
 
-	user := profile.User
-	fmt.Printf(
-		"%s has %d followers, %d posts, and %d IGTV vids\n",
-		profileStr, user.FollowerCount, user.MediaCount, user.IGTVCount,
-	)
-
+	feed := profile.Feed
+	if len(feed.Items) == 0 {
+		log.Printf("No posts found for %s\n", profileStr)
+		return []Post{}
+	}
+	for _, post := range feed.Items {
+		// Check if the last post was taken within the last day
+		if !time.Unix(post.TakenAt, 0).Before(time.Now().AddDate(0, 0, -1)) {
+			lastDayPosts = append(lastDayPosts, Post{
+				Caption:   post.Caption.Text,
+				ShortCode: post.Code,
+				Username:  profileStr})
+		}
+	}
+	// Only for testing purposes, should be removed later so it doesnt spam the logs
+	log.Printf("Found %d posts for %s in the last day\n", len(lastDayPosts), profileStr)
+	return lastDayPosts
 }
 
 func main() {
@@ -86,23 +108,15 @@ func main() {
 	} else {
 		log.Println("Loaded .goinsta file")
 	}
+	defer insta.Export(configPath)
+
 	err = insta.OpenApp()
 	if err != nil {
 		log.Fatal("Error opening app: ", err)
 	}
-	tl := insta.Timeline
-	for _, item := range tl.Items {
-		if item.IsCommercial || item.IsPaidPartnership {
-			fmt.Println("Skipping commercial post")
-			continue
-		}
-		fmt.Println(item.Caption.Text)
-		fmt.Println(item.Code)
-		fmt.Println(time.Unix(item.TakenAt, 0))
-	}
-	// this dont work
-	fmt.Println("Getting posts")
-	getPosts(insta)
 
-	defer insta.Export(configPath)
+	fmt.Println("Getting posts")
+	fmt.Println(getPosts(insta))
+	// Thats basically it after this this just goes directly to the python code
+
 }
