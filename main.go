@@ -1,11 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Davincible/goinsta/v3"
@@ -33,46 +34,50 @@ func loadEnvVar(varName string) (string, error) {
 }
 
 func loadEnvInstaUserPass() (string, string, error) {
-	username, err := loadEnvVar("INSTAGRAM_USERNAME")
+	username, err := loadEnvVar("INSTA_USERNAME")
 	if err != nil {
 		return "", "", err
 	}
-	password, err := loadEnvVar("INSTAGRAM_PASSWORD")
+	password, err := loadEnvVar("INSTA_PASSWORD")
 	if err != nil {
 		return "", "", err
 	}
 	return username, password, nil
 }
 
-func getPosts(insta *goinsta.Instagram) []Post {
-	profilesStr, err := loadEnvVar("INSTA_PROFILES")
+func getPosts(insta *goinsta.Instagram, postsChan chan<- []Post) {
+	profilesStr, err := loadEnvVar("INSTAGRAM_PAGES")
 	if err != nil {
 		log.Fatal("posts: ", err)
 	}
 
 	profiles := strings.Split(profilesStr, ",")
-	allPosts := []Post{}
+	var wg sync.WaitGroup
 	for _, profile := range profiles {
-		posts := getPostsLastDay(insta, profile)
-		if len(posts) != 0 {
-			allPosts = append(allPosts, posts...)
-		}
+		wg.Add(1)
+		go func(profile string) {
+			defer wg.Done()
+			getPostsLastDay(insta, profile, postsChan)
+		}(profile)
 	}
-	return allPosts
+	go func() {
+		wg.Wait()
+		close(postsChan)
+	}()
 }
 
-func getPostsLastDay(insta *goinsta.Instagram, profileStr string) []Post {
+func getPostsLastDay(insta *goinsta.Instagram, profileStr string, postsChan chan<- []Post) {
 	profile, err := insta.VisitProfile(profileStr)
 	if err != nil {
 		log.Printf("[W]: Error while fetching %s profile: %s\n", profileStr, err)
-		return []Post{}
+		return
 	}
 
 	lastDayPosts := []Post{}
 	feed := profile.Feed
 	if len(feed.Items) == 0 {
-		log.Printf("[W]: No posts found for %s\n", profileStr)
-		return []Post{}
+		log.Printf("[W]: %s hasn't posted yet.\n", profileStr)
+		return
 	}
 
 	for _, post := range feed.Items {
@@ -87,10 +92,11 @@ func getPostsLastDay(insta *goinsta.Instagram, profileStr string) []Post {
 	}
 	// Only for testing purposes, should be removed later so it doesnt spam the logs
 	log.Printf("[I]: Found %d posts for %s in the last day\n", len(lastDayPosts), profileStr)
-	return lastDayPosts
+	postsChan <- lastDayPosts
 }
 
 func main() {
+	log.SetOutput(os.Stderr)
 	err := godotenv.Load()
 	if err != nil {
 		log.Fatal("Error loading .env file")
@@ -118,7 +124,18 @@ func main() {
 		log.Fatal("Error opening app: ", err)
 	}
 
-	fmt.Println("Getting posts")
-	fmt.Println(getPosts(insta))
-	// Thats basically it after this this just goes directly to the python code
+	postsChan := make(chan []Post)
+	go getPosts(insta, postsChan)
+
+	for posts := range postsChan {
+		for _, post := range posts {
+			jsonPost, err := json.Marshal(post)
+			if err != nil {
+				log.Printf("[W]: Error marshalling post: %s\n", err)
+				continue
+			}
+			os.Stdout.Write(jsonPost)
+			os.Stdout.WriteString("\n")
+		}
+	}
 }
