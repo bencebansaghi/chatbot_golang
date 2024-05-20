@@ -33,12 +33,15 @@ func loadEnvVar(varName string) (string, error) {
 }
 
 func loadEnvInstaUserPass() (string, string, error) {
-	creds, err := loadEnvVar("INSTA_CREDS")
+	username, err := loadEnvVar("INSTAGRAM_USERNAME")
 	if err != nil {
 		return "", "", err
 	}
-	credsSplit := strings.Split(creds, ":")
-	return credsSplit[0], credsSplit[1], nil
+	password, err := loadEnvVar("INSTAGRAM_PASSWORD")
+	if err != nil {
+		return "", "", err
+	}
+	return username, password, nil
 }
 
 func getPosts(insta *goinsta.Instagram) []Post {
